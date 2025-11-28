@@ -10,6 +10,8 @@ from bleak import BleakScanner, BleakClient
 import qasync
 from pathlib import Path
 
+FILE_PACKET_SIZE = 1024
+
 # ---------------------------
 # Configuration / defaults
 # ---------------------------
@@ -43,7 +45,7 @@ class FileReceiver():
             self.file = None
         self.receiving = False
 
-    def handle_data(self, data: bytes):
+    def handle_data(self, data: bytearray):
         if self.receiving and self.file:
             self.file.write(data)
             self.rx_bytes += len(data)
@@ -61,7 +63,7 @@ class BLEWorker(QObject):
     scan_finished = pyqtSignal(list)  # list of (name, address)
     log = pyqtSignal(str)
     connected = pyqtSignal(bool)
-    notification_received = pyqtSignal(str)
+    notification_received = pyqtSignal(bytearray)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -125,13 +127,9 @@ class BLEWorker(QObject):
                 self.connected.emit(False)
 
     def _notification_callback(self, sender, data: bytearray):
-        try:
-            text = data.decode(errors="replace")
-        except Exception:
-            text = repr(data)
 
         # emit signal to Qt thread
-        self.notification_received.emit(text)
+        self.notification_received.emit(data)
 
     async def send_command(self, text: str):
         if not self.client or not self.client.is_connected:
@@ -249,7 +247,7 @@ class MainWindow(QtWidgets.QMainWindow):
         buff_layout.addWidget(QtWidgets.QLabel("Max lines:"))
         self.spin_max_lines = QtWidgets.QSpinBox()
         self.spin_max_lines.setRange(50, 100000)
-        self.spin_max_lines.setValue(5000)
+        self.spin_max_lines.setValue(50)
         buff_layout.addWidget(self.spin_max_lines)
         # clear button
         btn_clear_console = QtWidgets.QPushButton("Clear")
@@ -273,6 +271,13 @@ class MainWindow(QtWidgets.QMainWindow):
         # File receiver
         # ------------------
         self.file_receiver = FileReceiver()
+        self.packet_bytes_num = 0
+        self.packet_bytes = bytearray()
+
+        # Watchdog timer (for file receive timeout)
+        self.rx_watchdog = QtCore.QTimer()
+        self.rx_watchdog.setInterval(200)
+        self.rx_watchdog.timeout.connect(self.on_rx_timeout)
 
         # FIFO for console
         self.console_deque = deque(maxlen=self.spin_max_lines.value())
@@ -286,14 +291,14 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_send.clicked.connect(self.on_send_scpi)
         btn_idn.clicked.connect(lambda: self.input_scpi.setText("*IDN?"))
         btn_reset.clicked.connect(lambda: self.input_scpi.setText("*RST"))
-        btn_measure.clicked.connect(lambda: self.input_scpi.setText("MEAS?"))
+        btn_measure.clicked.connect(lambda: self.input_scpi.setText("FIL:READ? raw_data,test_file,bin"))
 
         # BLE worker signals -> UI slots
         self.ble.scan_started.connect(lambda: self.set_status("Scanning..."))
         self.ble.scan_finished.connect(self.on_scan_finished)
         self.ble.log.connect(self._append_console)
         self.ble.connected.connect(self.on_ble_connected)
-        self.ble.notification_received.connect(self._append_console)
+        self.ble.notification_received.connect(self._handle_notification)
 
     # -------------------------
     # UI slots and helpers
@@ -312,14 +317,37 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_console_widget()
 
     def _append_console(self, text: str):
+        if not self.file_receiver.receiving:
+            self.console_deque.append(text)
+            self._refresh_console_widget()
+
+    def _handle_notification(self, data):
+        try:
+            data = data.encode()  # ensure bytes
+        except Exception:
+            pass
         # called from signals
         # handle file receive mode first: incoming notifications treated as file bytes
         if self.file_receiver.receiving:
             try:
-                # treat the incoming text as bytes
-                self.file_receiver.handle_data(text.encode())
-                self.console_deque.append(text)
-                self._refresh_console_widget()
+                self.packet_bytes.extend(data)
+                self.packet_bytes_num += len(data)
+
+                if (self.packet_bytes_num == FILE_PACKET_SIZE) or (self.file_receiver.rx_bytes + self.packet_bytes_num >= self.file_receiver.file_size):
+                    # send ACK back
+                    asyncio.create_task(self.ble.send_command("FIL:ACK\n"))
+
+                    self.file_receiver.handle_data(self.packet_bytes)
+                    self.packet_bytes_num = 0
+                    self.packet_bytes = bytearray()
+
+                elif self.packet_bytes_num > FILE_PACKET_SIZE:
+                    self.console_deque.append(f"Error: received more than {FILE_PACKET_SIZE} bytes without ACK\n")
+
+                self.rx_watchdog.start()  # reset timeout timer
+
+                #self.console_deque.append(text)
+                #self._refresh_console_widget()
                 # if receive finished, notify console
                 if not self.file_receiver.receiving:
                     self.console_deque.append("File receive complete\n")
@@ -328,6 +356,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.console_deque.append(f"File receive error: {e}\n")
                 self._refresh_console_widget()
             return
+        
+        else:
+            text = data.decode(errors="replace")
 
         self.last_line += text
         if "\n" in self.last_line:
@@ -338,9 +369,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     _, payload = line.split(":", 1)
                     filename, filesize_part = map(str.strip, payload.split(",", 1))
                     filesize = int(filesize_part)
-                    # start receiving using parsed filename and size
-                    self.file_receiver.start_receiving(filename, filesize)
-                    # inform user in console (don't call _append_console to avoid recursion)
+                    
+                    self.file_receiver.start_receiving(filename, filesize) # start receiving using parsed filename and size
+                    
                     self.console_deque.append(f"Started receiving {filename} ({filesize} bytes)\n")
                     self._refresh_console_widget()
 
@@ -352,6 +383,14 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.last_line.endswith("\n"):
                 self.last_line = ""
         self._refresh_console_widget()
+
+    def on_rx_timeout(self):
+        if self.file_receiver.receiving:
+            self.packet_bytes_num = 0
+            self.packet_bytes = bytearray()
+            asyncio.create_task(self.ble.send_command("FIL:NACK\n"))
+            self.console_deque.append("File receive timeout: no data received for 1 second\n")
+            self._refresh_console_widget()
 
     def _refresh_console_widget(self):
         # show deque content in textedit
