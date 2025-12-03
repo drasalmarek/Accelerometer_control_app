@@ -147,9 +147,9 @@ def bin_to_csv(bin_file_path):
     plt.show()
 
     # computing STFT on ADXL data
-    NFFT = 512
+    NFFT = 2048
     n_overlap = 64
-    f_display_limit_low = 1
+    f_display_limit_low = 10
     f_display_limit_high = sensor_data['adxl']['avg_sampling_rate'] / 2
     plt.figure(2, figsize=(16, 9))
     plt.subplot(3, 1, 1)
@@ -206,5 +206,5 @@ def bin_to_csv(bin_file_path):
     plt.show()
 
 
-raw_file_path = os.path.join(os.path.dirname(__file__), 'raw_data_0000.bin')
+raw_file_path = os.path.join(os.path.dirname(__file__), 'raw_data_0011.bin')
 bin_to_csv(raw_file_path)

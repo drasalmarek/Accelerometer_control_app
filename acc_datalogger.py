@@ -72,7 +72,7 @@ class BLEWorker(QObject):
         self._connected_addr = None
         self.loop = asyncio.get_event_loop()
 
-    async def scan(self, timeout=5.0):
+    async def scan(self, timeout=1.0):
         self.scan_started.emit()
         self.log.emit(f"Scanning for {timeout:.1f}s ...\n")
         devices = await BleakScanner.discover(timeout=timeout)
@@ -95,7 +95,6 @@ class BLEWorker(QObject):
             await self.client.connect()
             self._connected_addr = address
             self.log.emit(f"Connected to {address}\n")
-            self.connected.emit(True)
         except Exception as e:
             self.log.emit(f"Connect failed: {e}\n")
             self.connected.emit(False)
@@ -106,8 +105,10 @@ class BLEWorker(QObject):
             try:
                 await self.client.start_notify(tx_char_uuid, self._notification_callback)
                 self.log.emit(f"Started notify on {tx_char_uuid}\n")
+                self.connected.emit(True)
             except Exception as e:
                 self.log.emit(f"Failed to start notify on {tx_char_uuid}: {e}\n")
+                self.connected.emit(False)
 
         # store tx/rx for use by send_command
         self.rx_char_uuid = rx_char_uuid
@@ -181,13 +182,65 @@ class MainWindow(QtWidgets.QMainWindow):
         grp_control = QtWidgets.QGroupBox("Control")
         ctrl_layout = QtWidgets.QVBoxLayout(grp_control)
 
+        # sensor address: editable dropdown with some MAC presets + Add button
+        sensor_addr_widget = QtWidgets.QWidget()
+        h_layout = QtWidgets.QHBoxLayout(sensor_addr_widget)
+        h_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.sensor_combo = QtWidgets.QComboBox()
+        self.sensor_combo.setEditable(True)
+        self.sensor_combo.lineEdit().setPlaceholderText("Sensor address (e.g. AA:BB:CC:11:22:33)...")
+
+        # some example MAC address options
+        presets = [
+            "E7:31:E9:B5:72:2A",
+        ]
+        for mac in presets:
+            self.sensor_combo.addItem(mac)
+
+        btn_add_mac = QtWidgets.QPushButton("Add")
+        h_layout.addWidget(self.sensor_combo)
+        h_layout.addWidget(btn_add_mac)
+
+        # expose widget as sensor_addr_input so existing code (ctrl_layout.addWidget(self.sensor_addr_input))
+        # continues to work. Provide a .text() method to mimic QLineEdit used elsewhere.
+        self.sensor_addr_input = sensor_addr_widget
+        self.sensor_addr_input.text = lambda: self.sensor_combo.currentText()
+
+        def is_mac(s: str) -> bool:
+            parts = s.split(":")
+            if len(parts) != 6:
+                return False
+            for p in parts:
+                if len(p) != 2:
+                    return False
+                try:
+                    int(p, 16)
+                except ValueError:
+                    return False
+            return True
+
+        def add_mac():
+            txt = self.sensor_combo.currentText().strip()
+            if not txt:
+                return
+            if not is_mac(txt):
+                QtWidgets.QMessageBox.warning(self, "Invalid MAC", "Invalid MAC address format (expected XX:XX:XX:XX:XX:XX)")
+                return
+            if self.sensor_combo.findText(txt) == -1:
+                self.sensor_combo.addItem(txt)
+                self.sensor_combo.setCurrentText(txt)
+
+        btn_add_mac.clicked.connect(add_mac)
+        btn_request_connection = QtWidgets.QPushButton("Request")
         btn_scan = QtWidgets.QPushButton("Scan")
-        btn_connect = QtWidgets.QPushButton("Connect")
         btn_disconnect = QtWidgets.QPushButton("Disconnect")
+        self.request_connection_on = False
         grp_control.setLayout(ctrl_layout)
 
+        ctrl_layout.addWidget(self.sensor_addr_input)
+        ctrl_layout.addWidget(btn_request_connection)
         ctrl_layout.addWidget(btn_scan)
-        ctrl_layout.addWidget(btn_connect)
         ctrl_layout.addWidget(btn_disconnect)
 
         # device list
@@ -212,14 +265,26 @@ class MainWindow(QtWidgets.QMainWindow):
         grp_scpi = QtWidgets.QGroupBox("SCPI")
         scpi_layout = QtWidgets.QVBoxLayout(grp_scpi)
 
-        # preset buttons
-        presets_layout = QtWidgets.QHBoxLayout()
+        # preset buttons in a grid
+        presets_layout = QtWidgets.QGridLayout()
+
+        btn_on = QtWidgets.QPushButton("POW ON")
+        btn_off = QtWidgets.QPushButton("POW OFF")
         btn_idn = QtWidgets.QPushButton("*IDN?")
-        btn_reset = QtWidgets.QPushButton("*RST")
-        btn_measure = QtWidgets.QPushButton("MEAS?")
-        presets_layout.addWidget(btn_idn)
-        presets_layout.addWidget(btn_reset)
-        presets_layout.addWidget(btn_measure)
+
+        btn_measure_start = QtWidgets.QPushButton("MEAS START")
+        btn_measure_stop = QtWidgets.QPushButton("MEAS STOP")
+
+        btn_err_count = QtWidgets.QPushButton("ERR COUNT?")
+        btn_err_next = QtWidgets.QPushButton("ERR NEXT?")
+
+        presets_layout.addWidget(btn_on, 0, 0)
+        presets_layout.addWidget(btn_off, 0, 1)
+        presets_layout.addWidget(btn_idn, 0, 2)
+        presets_layout.addWidget(btn_measure_start, 1, 0)
+        presets_layout.addWidget(btn_measure_stop, 1, 1)
+        presets_layout.addWidget(btn_err_count, 2, 0)
+        presets_layout.addWidget(btn_err_next, 2, 1)
         scpi_layout.addLayout(presets_layout)
 
         # input + send
@@ -240,6 +305,7 @@ class MainWindow(QtWidgets.QMainWindow):
         console_layout = QtWidgets.QVBoxLayout(grp_console)
         self.console_view = QtWidgets.QTextEdit()
         self.console_view.setReadOnly(True)
+        self.console_view.textChanged.connect(lambda: self.console_view.moveCursor(QtGui.QTextCursor.End)) # auto-scroll
         self.console_view.setFixedWidth(400)
         console_layout.addWidget(self.console_view)
         # console buffer size control
@@ -283,15 +349,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.console_deque = deque(maxlen=self.spin_max_lines.value())
 
         # connections
-        btn_scan.clicked.connect(self.on_scan_clicked)
-        btn_connect.clicked.connect(self.on_connect_clicked)
+        btn_request_connection.clicked.connect(self.on_request_clicked)
+        btn_scan.clicked.connect(self.scan_start)
         btn_disconnect.clicked.connect(self.on_disconnect_clicked)
         btn_clear_console.clicked.connect(self.on_clear_console)
         self.spin_max_lines.valueChanged.connect(self.on_max_lines_changed)
         btn_send.clicked.connect(self.on_send_scpi)
+        btn_on.clicked.connect(lambda: self.input_scpi.setText("POW:ON"))
+        btn_off.clicked.connect(lambda: self.input_scpi.setText("POW:OFF"))
         btn_idn.clicked.connect(lambda: self.input_scpi.setText("*IDN?"))
-        btn_reset.clicked.connect(lambda: self.input_scpi.setText("*RST"))
-        btn_measure.clicked.connect(lambda: self.input_scpi.setText("FIL:READ? raw_data,test_file,bin"))
+        btn_measure_start.clicked.connect(lambda: self.input_scpi.setText("MEAS:START"))
+        btn_measure_stop.clicked.connect(lambda: self.input_scpi.setText("MEAS:STOP"))
+        btn_err_count.clicked.connect(lambda: self.input_scpi.setText("SYST:ERR:COUNT?"))
+        btn_err_next.clicked.connect(lambda: self.input_scpi.setText("SYST:ERR:NEXT?"))
+
 
         # BLE worker signals -> UI slots
         self.ble.scan_started.connect(lambda: self.set_status("Scanning..."))
@@ -305,6 +376,13 @@ class MainWindow(QtWidgets.QMainWindow):
     # -------------------------
     def set_status(self, text: str):
         self.status.setText(text)
+
+    def on_request_clicked(self):
+        self.request_connection_on = not self.request_connection_on
+        state = "ON" if self.request_connection_on else "OFF"
+        self._append_console(f"Request connection toggled {state}\n")
+
+        self.scan_start()
 
     def on_max_lines_changed(self, val):
         # adjust deque size while preserving contents
@@ -400,10 +478,10 @@ class MainWindow(QtWidgets.QMainWindow):
     # Scan / connect handlers
     # -------------------------
     @qasync.asyncSlot()
-    async def on_scan_clicked(self):
+    async def scan_start(self):
         # clear previous list
         self.device_list.clear()
-        await self.ble.scan(timeout=5.0)
+        await self.ble.scan(timeout=1.0)
 
     def on_scan_finished(self, devices):
         # devices: list of (name, address)
@@ -414,6 +492,16 @@ class MainWindow(QtWidgets.QMainWindow):
             item.setData(QtCore.Qt.UserRole, addr)
             self.device_list.addItem(item)
         self.set_status(f"Scan found {len(devices)} device(s)")
+
+        for addr in devices:
+            if addr[1] == self.sensor_addr_input.text().strip() and self.request_connection_on:
+                # auto-connect to this device
+                asyncio.create_task(self.ble.connect(addr[1], self.input_rx_uuid.text().strip() or None, self.input_tx_uuid.text().strip() or None))
+                self.request_connection_on = False
+                break
+
+        if self.request_connection_on:
+            self.scan_start()
 
     @qasync.asyncSlot()
     async def on_connect_clicked(self):
@@ -431,6 +519,10 @@ class MainWindow(QtWidgets.QMainWindow):
         await self.ble.disconnect()
 
     def on_ble_connected(self, connected: bool):
+        if connected:
+            cmd = "POW:ON"
+            self._append_console(f"Sending on connect: {cmd}\n")
+            asyncio.create_task(self.ble.send_command(cmd))
         self.set_status("Connected" if connected else "Disconnected")
 
     # -------------------------
