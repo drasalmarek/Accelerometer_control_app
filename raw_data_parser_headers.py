@@ -206,5 +206,5 @@ def bin_to_csv(bin_file_path):
     plt.show()
 
 
-raw_file_path = os.path.join(os.path.dirname(__file__), 'raw_data_0011.bin')
+raw_file_path = os.path.join(os.path.dirname(__file__), 'raw_data_0002.bin')
 bin_to_csv(raw_file_path)

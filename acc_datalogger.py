@@ -492,6 +492,7 @@ class MainWindow(QtWidgets.QMainWindow):
             item.setData(QtCore.Qt.UserRole, addr)
             self.device_list.addItem(item)
         self.set_status(f"Scan found {len(devices)} device(s)")
+        self.device_list.update()
 
         for addr in devices:
             if addr[1] == self.sensor_addr_input.text().strip() and self.request_connection_on:
@@ -502,17 +503,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if self.request_connection_on:
             self.scan_start()
-
-    @qasync.asyncSlot()
-    async def on_connect_clicked(self):
-        sel = self.device_list.currentItem()
-        if not sel:
-            self.set_status("Select device first")
-            return
-        addr = sel.data(QtCore.Qt.UserRole)
-        rx = self.input_rx_uuid.text().strip() or None
-        tx = self.input_tx_uuid.text().strip() or None
-        await self.ble.connect(addr, rx, tx)
 
     @qasync.asyncSlot()
     async def on_disconnect_clicked(self):
