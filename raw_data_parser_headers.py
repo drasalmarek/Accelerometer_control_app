@@ -147,14 +147,16 @@ def bin_to_csv(bin_file_path):
     plt.show()
 
     # computing STFT on ADXL data
-    NFFT = 2048
+    NFFT = 2048*2
     n_overlap = 64
     f_display_limit_low = 10
+    vmin = 0
+    vmax = 60
     f_display_limit_high = sensor_data['adxl']['avg_sampling_rate'] / 2
     plt.figure(2, figsize=(16, 9))
     plt.subplot(3, 1, 1)
     Sxx, f, t, _ = plt.specgram(np.array(sensor_data['adxl']['x']), NFFT=NFFT, Fs=sensor_data['adxl']['avg_sampling_rate'], noverlap=n_overlap, scale='dB')
-    plt.pcolormesh(t, f, 10 * np.log10(Sxx), shading='auto', cmap='plasma')
+    plt.pcolormesh(t, f, 10 * np.log10(Sxx), shading='auto', cmap='plasma', vmin=vmin, vmax=vmax)
     plt.colorbar(label='Intensity [dB]')
     plt.yscale('log')  # Set frequency axis to log scale
     plt.ylim(f_display_limit_low, f_display_limit_high)  # Limit frequency axis
@@ -164,7 +166,7 @@ def bin_to_csv(bin_file_path):
 
     plt.subplot(3, 1, 2)
     Sxx, f, t, _ = plt.specgram(np.array(sensor_data['adxl']['y']), NFFT=NFFT, Fs=sensor_data['adxl']['avg_sampling_rate'], noverlap=n_overlap, scale='dB')
-    plt.pcolormesh(t, f, 10 * np.log10(Sxx), shading='auto', cmap='plasma')
+    plt.pcolormesh(t, f, 10 * np.log10(Sxx), shading='auto', cmap='plasma', vmin=vmin, vmax=vmax)
     plt.colorbar(label='Intensity [dB]')
     plt.yscale('log')  # Set frequency axis to log scale
     plt.ylim(f_display_limit_low, f_display_limit_high)  # Limit frequency axis
@@ -174,7 +176,7 @@ def bin_to_csv(bin_file_path):
 
     plt.subplot(3, 1, 3)
     Sxx, f, t, _ = plt.specgram(np.array(sensor_data['adxl']['z']), NFFT=NFFT, Fs=sensor_data['adxl']['avg_sampling_rate'], noverlap=n_overlap, scale='dB')
-    plt.pcolormesh(t, f, 10 * np.log10(Sxx), shading='auto', cmap='plasma')
+    plt.pcolormesh(t, f, 10 * np.log10(Sxx), shading='auto', cmap='plasma', vmin=vmin, vmax=vmax)
     plt.colorbar(label='Intensity [dB]')
     plt.yscale('log')  # Set frequency axis to log scale
     plt.ylim(f_display_limit_low, f_display_limit_high)  # Limit frequency axis
@@ -208,3 +210,5 @@ def bin_to_csv(bin_file_path):
 
 raw_file_path = os.path.join(os.path.dirname(__file__), 'raw_data_0002.bin')
 bin_to_csv(raw_file_path)
+
+# something nice in 0004, 0057
