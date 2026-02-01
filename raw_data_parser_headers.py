@@ -20,14 +20,55 @@ sensor_data = {
     },
 
     'bno' : {
-        'x' : [],
-        'y' : [],
-        'z' : [],
+        'acc_x' : [],
+        'acc_y' : [],
+        'acc_z' : [],
+        'gyr_x' : [],
+        'gyr_y' : [],
+        'gyr_z' : [],
+        'mag_x' : [],
+        'mag_y' : [],
+        'mag_z' : [],
+        'eul_heading' : [],
+        'eul_roll' : [],
+        'eul_pitch' : [],
+        'quat_w' : [],
+        'quat_x' : [],
+        'quat_y' : [],
+        'quat_z' : [],
+        'lia_x' : [],
+        'lia_y' : [],
+        'lia_z' : [],
+        'grv_x' : [],
+        'grv_y' : [],
+        'grv_z' : [],
+        'temp' : [],
+        'single_size' : (6*3 + 6 + 8 + 6 + 6 + 1),
+
+        'timestamps' : [],
+        'sampling_rates' : [],
+        'avg_sampling_rate' : 0
+    },
+
+    'adc0' : {
+        'values' : [],
         'timestamps' : [],
         'sampling_rates' : [],
         'avg_sampling_rate' : 0
     }
 }
+
+def bytes_to_data(bytes_read, number_of_values):
+    # Unpack 6 uint8_t values
+    u = struct.unpack(f'{number_of_values*2}B', bytes_read)
+    output = []
+    for i in range(0, number_of_values):
+        val = (u[i*2 + 1] << 8) | u[i*2]
+        # Interpret as signed int16
+        val = struct.unpack('<h', struct.pack('<H', val))[0]
+        output.append(val)
+    return output
+
 
 def bin_to_csv(bin_file_path):
     with open(bin_file_path, 'rb') as bin_file:
@@ -44,7 +85,7 @@ def bin_to_csv(bin_file_path):
             index = header[0]
             timestamp = struct.unpack('<I', header[1:5])[0]
             data_size = struct.unpack('<I', header[5:9])[0]
-            print(f"Index: {index}, Timestamp: {timestamp}, Data size: {data_size}, {data_size/6} samples")
+            print(f"Index: {index}, Timestamp: {timestamp}, Data size: {data_size}")
 
             if index == 1:
                 start_time = sensor_data['adxl']['timestamps'][-1] if sensor_data['adxl']['timestamps'] else start_time
@@ -56,56 +97,107 @@ def bin_to_csv(bin_file_path):
                     bytes_read = bin_file.read(6)
                     if len(bytes_read) < 6:
                         break
-                    # Unpack 6 uint8_t values
-                    u = struct.unpack('6B', bytes_read)
-                    # Convert to 3 int16_t values (little-endian)
-                    i1 = (u[1] << 8) | u[0]
-                    i2 = (u[3] << 8) | u[2]
-                    i3 = (u[5] << 8) | u[4]
-                    # Interpret as signed int16
-                    i1 = struct.unpack('<h', struct.pack('<H', i1))[0]
-                    i2 = struct.unpack('<h', struct.pack('<H', i2))[0]
-                    i3 = struct.unpack('<h', struct.pack('<H', i3))[0]
-                    #writer.writerow([i1, i2, i3])
-
-                    sensor_data['adxl']['x'].append(i1)
-                    sensor_data['adxl']['y'].append(i2)
-                    sensor_data['adxl']['z'].append(i3)
+                    data = bytes_to_data(bytes_read, 3)
+                    sensor_data['adxl']['x'].append(data[0])
+                    sensor_data['adxl']['y'].append(data[1])
+                    sensor_data['adxl']['z'].append(data[2])
 
             elif index == 2:
                 start_time = sensor_data['bno']['timestamps'][-1] if sensor_data['bno']['timestamps'] else start_time
                 sensor_data['bno']['timestamps'].append(timestamp)
-                sampling_rate = (data_size / 6) / ((timestamp - start_time) / 1000)
+                sampling_rate = (data_size / sensor_data['bno']['single_size']) / ((timestamp - start_time) / 1000)
                 sensor_data['bno']['sampling_rates'].append(sampling_rate)
 
-                for _ in range(data_size//6):
+                for _ in range(data_size//sensor_data['bno']['single_size']):
                     bytes_read = bin_file.read(6)
                     if len(bytes_read) < 6:
                         break
-                    # Unpack 6 uint8_t values
-                    u = struct.unpack('6B', bytes_read)
-                    # Convert to 3 int16_t values (little-endian)
-                    i1 = (u[1] << 8) | u[0]
-                    i2 = (u[3] << 8) | u[2]
-                    i3 = (u[5] << 8) | u[4]
-                    # Interpret as signed int16
-                    i1 = struct.unpack('<h', struct.pack('<H', i1))[0]
-                    i2 = struct.unpack('<h', struct.pack('<H', i2))[0]
-                    i3 = struct.unpack('<h', struct.pack('<H', i3))[0]
-                    #writer.writerow([i1, i2, i3])
-            
-                    sensor_data['bno']['x'].append(i1)
-                    sensor_data['bno']['y'].append(i2)
-                    sensor_data['bno']['z'].append(i3)
+                    data = bytes_to_data(bytes_read, 3)
+                    sensor_data['bno']['acc_x'].append(data[0])
+                    sensor_data['bno']['acc_y'].append(data[1])
+                    sensor_data['bno']['acc_z'].append(data[2])
+
+                    bytes_read = bin_file.read(6)
+                    if len(bytes_read) < 6:
+                        break
+                    data = bytes_to_data(bytes_read, 3)
+                    sensor_data['bno']['gyr_x'].append(data[0])
+                    sensor_data['bno']['gyr_y'].append(data[1])
+                    sensor_data['bno']['gyr_z'].append(data[2])
+
+                    bytes_read = bin_file.read(6)
+                    if len(bytes_read) < 6:
+                        break
+                    data = bytes_to_data(bytes_read, 3)
+                    sensor_data['bno']['mag_x'].append(data[0])
+                    sensor_data['bno']['mag_y'].append(data[1])
+                    sensor_data['bno']['mag_z'].append(data[2])
+
+                    bytes_read = bin_file.read(6)
+                    if len(bytes_read) < 6:
+                        break
+                    data = bytes_to_data(bytes_read, 3)
+                    sensor_data['bno']['eul_heading'].append(data[0])
+                    sensor_data['bno']['eul_roll'].append(data[1])
+                    sensor_data['bno']['eul_pitch'].append(data[2])
+
+                    bytes_read = bin_file.read(8)
+                    if len(bytes_read) < 8:
+                        break
+                    data = bytes_to_data(bytes_read, 4)
+                    sensor_data['bno']['quat_w'].append(data[0])
+                    sensor_data['bno']['quat_x'].append(data[1])
+                    sensor_data['bno']['quat_y'].append(data[2])
+                    sensor_data['bno']['quat_z'].append(data[3])
+
+                    bytes_read = bin_file.read(6)
+                    if len(bytes_read) < 6:
+                        break
+                    data = bytes_to_data(bytes_read, 3)
+                    sensor_data['bno']['lia_x'].append(data[0])
+                    sensor_data['bno']['lia_y'].append(data[1])
+                    sensor_data['bno']['lia_z'].append(data[2])
+
+                    bytes_read = bin_file.read(6)
+                    if len(bytes_read) < 6:
+                        break
+                    data = bytes_to_data(bytes_read, 3)
+                    sensor_data['bno']['grv_x'].append(data[0])
+                    sensor_data['bno']['grv_y'].append(data[1])
+                    sensor_data['bno']['grv_z'].append(data[2])
+
+                    bytes_read = bin_file.read(1)
+                    if len(bytes_read) < 1:
+                        break
+                    u = struct.unpack('1B', bytes_read)
+                    sensor_data['bno']['temp'].append(u[0])
+
+            elif index == 3:
+                start_time = sensor_data['adc0']['timestamps'][-1] if sensor_data['adc0']['timestamps'] else start_time
+                sensor_data['adc0']['timestamps'].append(timestamp)
+                sampling_rate = (data_size) / ((timestamp - start_time) / 1000)
+                sensor_data['adc0']['sampling_rates'].append(sampling_rate)
+
+                for _ in range(data_size):
+                    bytes_read = bin_file.read(1)
+                    u = struct.unpack('1B', bytes_read)
+                    i = struct.unpack('<h', struct.pack('<H', u[0]))[0]
+                    sensor_data['adc0']['values'].append(i)
+
             
 
     # Calculate average sampling rates
     if sensor_data['adxl']['sampling_rates']:
         sensor_data['adxl']['avg_sampling_rate'] = sum(sensor_data['adxl']['sampling_rates']) / len(sensor_data['adxl']['sampling_rates'])
         print(f"ADXL Average Sampling Rate: {sensor_data['adxl']['avg_sampling_rate']} Hz")
+
     if sensor_data['bno']['sampling_rates']:
         sensor_data['bno']['avg_sampling_rate'] = sum(sensor_data['bno']['sampling_rates']) / len(sensor_data['bno']['sampling_rates'])
         print(f"BNO Average Sampling Rate: {sensor_data['bno']['avg_sampling_rate']} Hz")
+
+    if sensor_data['adc0']['sampling_rates']:
+        sensor_data['adc0']['avg_sampling_rate'] = sum(sensor_data['adc0']['sampling_rates']) / len(sensor_data['adc0']['sampling_rates'])
+        print(f"ADC0 Average Sampling Rate: {sensor_data['adc0']['avg_sampling_rate']} Hz")
 
     # write to CSV
     adxl_file = os.path.join(os.path.dirname(__file__), 'output_adxl_data.csv')
@@ -118,29 +210,94 @@ def bin_to_csv(bin_file_path):
     bno_file = os.path.join(os.path.dirname(__file__), 'output_bno_data.csv')
     with open(bno_file, 'w', newline='') as bno_csvfile:
         writer = csv.writer(bno_csvfile)
-        writer.writerow(['t', 'X', 'Y', 'Z'])
-        for i in range(len(sensor_data['bno']['x'])):
-            writer.writerow([i / sensor_data['bno']['avg_sampling_rate'], sensor_data['bno']['x'][i], sensor_data['bno']['y'][i], sensor_data['bno']['z'][i]])
+        writer.writerow(['t', 
+                         'acc_X', 'acc_Y', 'acc_Z', 
+                         'gyr_X', 'gyr_Y', 'gyr_Z', 
+                         'mag_X', 'mag_Y', 'mag_Z',
+                         'eul_heading', 'eul_roll', 'eul_pitch',
+                         'quat_w', 'quat_x', 'quat_y', 'quat_z',
+                         'lia_X', 'lia_Y', 'lia_Z',
+                         'grv_X', 'grv_Y', 'grv_Z',
+                         'temp'])
+        for i in range(len(sensor_data['bno']['acc_x'])):
+            writer.writerow([i / sensor_data['bno']['avg_sampling_rate'], 
+                    sensor_data['bno']['acc_x'][i], sensor_data['bno']['acc_y'][i], sensor_data['bno']['acc_z'][i], 
+                    sensor_data['bno']['gyr_x'][i], sensor_data['bno']['gyr_y'][i], sensor_data['bno']['gyr_z'][i], 
+                    sensor_data['bno']['mag_x'][i], sensor_data['bno']['mag_y'][i], sensor_data['bno']['mag_z'][i],
+                    sensor_data['bno']['eul_heading'][i], sensor_data['bno']['eul_roll'][i], sensor_data['bno']['eul_pitch'][i],
+                    sensor_data['bno']['quat_w'][i], sensor_data['bno']['quat_x'][i], sensor_data['bno']['quat_y'][i], sensor_data['bno']['quat_z'][i],
+                    sensor_data['bno']['lia_x'][i], sensor_data['bno']['lia_y'][i], sensor_data['bno']['lia_z'][i],
+                    sensor_data['bno']['grv_x'][i], sensor_data['bno']['grv_y'][i], sensor_data['bno']['grv_z'][i],
+                    sensor_data['bno']['temp'][i]])
+
+    adc0_file = os.path.join(os.path.dirname(__file__), 'output_adc0_data.csv')
+    with open(adc0_file, 'w', newline='') as adc0_csvfile:
+        writer = csv.writer(adc0_csvfile)
+        writer.writerow(['t', 'ADC0'])
+        for i in range(len(sensor_data['adc0']['values'])):
+            writer.writerow([i / sensor_data['adc0']['avg_sampling_rate'], sensor_data['adc0']['values'][i]])
 
     plt.figure(1, figsize=(12, 6))
-    plt.subplot(2, 1, 1)
+    plt.subplot(3, 1, 1)
     t = [i / sensor_data['adxl']['avg_sampling_rate'] for i in range(len(sensor_data['adxl']['x']))]  # Assuming a sampling rate of 3200 Hz for ADXL
     plt.plot(t, sensor_data['adxl']['x'], label='ADXL X-axis', color='r')
     plt.plot(t, sensor_data['adxl']['y'], label='ADXL Y-axis', color='g')
     plt.plot(t, sensor_data['adxl']['z'], label='ADXL Z-axis', color='b')
-    plt.xlabel('Sample Number')
-    plt.ylabel('Acceleration')
+    plt.xlabel('Time [sec]')
+    plt.ylabel('Output Value')
     plt.title('ADXL Accelerometer Data')
     plt.legend()
     plt.grid(True)
-    plt.subplot(2, 1, 2)
-    t = [i / sensor_data['bno']['avg_sampling_rate'] for i in range(len(sensor_data['bno']['x']))]  # Assuming a sampling rate of 100 Hz for BNO
-    plt.plot(t, sensor_data['bno']['x'], label='BNO X-axis', color='r')
-    plt.plot(t, sensor_data['bno']['y'], label='BNO Y-axis', color='g')
-    plt.plot(t, sensor_data['bno']['z'], label='BNO Z-axis', color='b')
-    plt.xlabel('Sample Number')
-    plt.ylabel('Acceleration')
+    plt.subplot(3, 1, 2)
+    t = [i / sensor_data['bno']['avg_sampling_rate'] for i in range(len(sensor_data['bno']['acc_x']))]  # Assuming a sampling rate of 100 Hz for BNO
+    plt.plot(t, sensor_data['bno']['acc_x'], label='BNO X-axis', color='r')
+    plt.plot(t, sensor_data['bno']['acc_y'], label='BNO Y-axis', color='g')
+    plt.plot(t, sensor_data['bno']['acc_z'], label='BNO Z-axis', color='b')
+    plt.xlabel('Time [sec]')
+    plt.ylabel('Output Value')
     plt.title('BNO Accelerometer Data')
+    plt.legend()
+    plt.grid(True)
+    plt.subplot(3, 1, 3)
+    t = [i / sensor_data['adc0']['avg_sampling_rate'] for i in range(len(sensor_data['adc0']['values']))]  # Assuming a sampling rate of 100 Hz for BNO
+    plt.plot(t, sensor_data['adc0']['values'], label='ADC0 values', color='r')
+    plt.xlabel('Time [sec]')
+    plt.ylabel('ADC value')
+    plt.title('ADC0 Data')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    plt.figure(1, figsize=(12, 6))
+    plt.subplot(3, 1, 1)
+    t = [i / sensor_data['bno']['avg_sampling_rate'] for i in range(len(sensor_data['bno']['acc_x']))]  # Assuming a sampling rate of 3200 Hz for ADXL
+    plt.plot(t, sensor_data['bno']['acc_x'], label='ADXL X-axis', color='r')
+    plt.plot(t, sensor_data['bno']['acc_y'], label='ADXL Y-axis', color='g')
+    plt.plot(t, sensor_data['bno']['acc_z'], label='ADXL Z-axis', color='b')
+    plt.xlabel('Time [sec]')
+    plt.ylabel('Output Value')
+    plt.title('BNO Accelerometer Data')
+    plt.legend()
+    plt.grid(True)
+    plt.subplot(3, 1, 2)
+    t = [i / sensor_data['bno']['avg_sampling_rate'] for i in range(len(sensor_data['bno']['gyr_x']))]  # Assuming a sampling rate of 100 Hz for BNO
+    plt.plot(t, sensor_data['bno']['gyr_x'], label='BNO X-axis', color='r')
+    plt.plot(t, sensor_data['bno']['gyr_y'], label='BNO Y-axis', color='g')
+    plt.plot(t, sensor_data['bno']['gyr_z'], label='BNO Z-axis', color='b')
+    plt.xlabel('Time [sec]')
+    plt.ylabel('Output Value')
+    plt.title('BNO Gyroscope Data')
+    plt.legend()
+    plt.grid(True)
+    plt.subplot(3, 1, 3)
+    t = [i / sensor_data['bno']['avg_sampling_rate'] for i in range(len(sensor_data['bno']['mag_x']))]  # Assuming a sampling rate of 100 Hz for BNO
+    plt.plot(t, sensor_data['bno']['mag_x'], label='BNO X-axis', color='r')
+    plt.plot(t, sensor_data['bno']['mag_y'], label='BNO Y-axis', color='g')
+    plt.plot(t, sensor_data['bno']['mag_z'], label='BNO Z-axis', color='b')
+    plt.xlabel('Time [sec]')
+    plt.ylabel('Output Value')
+    plt.title('BNO Magnetometer Data')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -208,7 +365,7 @@ def bin_to_csv(bin_file_path):
     plt.show()
 
 
-raw_file_path = os.path.join(os.path.dirname(__file__), 'raw_data_0002.bin')
+raw_file_path = os.path.join(os.path.dirname(__file__), 'raw_data_0012.bin')
 bin_to_csv(raw_file_path)
 
 # something nice in 0004, 0057
