@@ -1,0 +1,252 @@
+
+{
+    "Device" : 201,
+    "Sensor data" : [
+        {
+            "Sensor" : "ADXL345",
+            "Outputs" : [
+                {"acc_x" : {
+                    "Units" : "m/s^2",
+                    "Description" : "Acceleration in X direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 3200,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"acc_y" : {
+                    "Units" : "m/s^2",
+                    "Description" : "Acceleration in Y direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 3200,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"acc_z" : {
+                    "Units" : "m/s^2",
+                    "Description" : "Acceleration in Z direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 3200,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }}
+            ]
+        },
+        {
+            "Sensor" : "BNO055",
+            "Outputs" : [
+                {"acc_x" : {
+                    "Units" : "m/s^2",
+                    "Description" : "Acceleration in X direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"acc_y" : {
+                    "Units" : "m/s^2",
+                    "Description" : "Acceleration in Y direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"acc_z" : {
+                    "Units" : "m/s^2",
+                    "Description" : "Acceleration in Z direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+
+                {"gyr_x" : {
+                    "Units" : "deg/s",
+                    "Description" : "Angular velocity in X direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"gyr_y" : {
+                    "Units" : "deg/s",
+                    "Description" : "Angular velocity in Y direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"gyr_z" : {
+                    "Units" : "deg/s",
+                    "Description" : "Angular velocity in Z direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+
+                {"mag_x" : {
+                    "Units" : "uT",
+                    "Description" : "Magnetic field in X direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"mag_y" : {
+                    "Units" : "uT",
+                    "Description" : "Magnetic field in Y direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"mag_z" : {
+                    "Units" : "uT",
+                    "Description" : "Magnetic field in Z direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+
+                {"eul_heading" : {
+                    "Units" : "deg",
+                    "Description" : "Euler heading angle",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"eul_roll" : {
+                    "Units" : "deg",
+                    "Description" : "Euler roll angle",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"eul_pitch" : {
+                    "Units" : "deg",
+                    "Description" : "Euler pitch angle",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+
+                {"quat_w" : {
+                    "Units" : "",
+                    "Description" : "Quaternion w component",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"quat_x" : {
+                    "Units" : "",
+                    "Description" : "Quaternion x component",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"quat_y" : {
+                    "Units" : "",
+                    "Description" : "Quaternion y component",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"quat_z" : {
+                    "Units" : "",
+                    "Description" : "Quaternion z component",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+
+                {"lia_x" : {
+                    "Units" : "m/s^2",
+                    "Description" : "Linear acceleration in X direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"lia_y" : {
+                    "Units" : "m/s^2",
+                    "Description" : "Linear acceleration in Y direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"lia_z" : {
+                    "Units" : "m/s^2",
+                    "Description" : "Linear acceleration in Z direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+
+                {"grv_x" : {
+                    "Units" : "m/s^2",
+                    "Description" : "Gravity acceleration in X direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"grv_y" : {
+                    "Units" : "m/s^2",
+                    "Description" : "Gravity acceleration in Y direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"grv_z" : {
+                    "Units" : "m/s^2",
+                    "Description" : "Gravity acceleration in Z direction",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+
+                {"temp" : {
+                    "Units" : "C",
+                    "Description" : "Temperature",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 100,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }}
+            ]
+        },
+        {
+            "Sensor" : "Analog Input",
+            "Outputs" : [
+                {"AI1" : {
+                    "Units" : "V",
+                    "Description" : "Values from analog input 1 in volts",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 5000,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }},
+                {"AI2" : {
+                    "Units" : "V",
+                    "Description" : "Values from analog input 2 in volts",
+                    "Data type" : "float",
+                    "Sampling rate (Hz)" : 5000,
+                    "Data length" : 4,
+                    "Data" : [0.1, 0.2, 0.3, 0.4]
+                }}
+            ]
+        }
+    ]
+}

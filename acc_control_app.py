@@ -10,6 +10,11 @@ from bleak import BleakScanner, BleakClient
 import qasync
 from pathlib import Path
 
+import numpy as np
+import struct
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
 FILE_PACKET_SIZE = 1024
 
 # ---------------------------
@@ -20,6 +25,180 @@ UART_RX_CHAR_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 UART_TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
 SENSOR_ADDR = ["E7:31:E9:B5:72:2A", "C6:E6:A3:FC:45:F5"]
+
+def process_data_file(file_path):
+    sensor_data = {
+        'adxl' : {
+            'x' : [],
+            'y' : [],
+            'z' : [],
+            'timestamps' : [],
+            'sampling_rates' : [],
+            'avg_sampling_rate' : 0
+        },
+
+        'bno' : {
+            'acc_x' : [],
+            'acc_y' : [],
+            'acc_z' : [],
+            'gyr_x' : [],
+            'gyr_y' : [],
+            'gyr_z' : [],
+            'mag_x' : [],
+            'mag_y' : [],
+            'mag_z' : [],
+            'eul_heading' : [],
+            'eul_roll' : [],
+            'eul_pitch' : [],
+            'quat_w' : [],
+            'quat_x' : [],
+            'quat_y' : [],
+            'quat_z' : [],
+            'lia_x' : [],
+            'lia_y' : [],
+            'lia_z' : [],
+            'grv_x' : [],
+            'grv_y' : [],
+            'grv_z' : [],
+            'temp' : [],
+            'single_size' : (6*3 + 6 + 8 + 6 + 6 + 1),
+
+            'timestamps' : [],
+            'sampling_rates' : [],
+            'avg_sampling_rate' : 0
+        },
+
+        'adc0' : {
+            'values' : [],
+            'timestamps' : [],
+            'sampling_rates' : [],
+            'avg_sampling_rate' : 0
+        }
+    }
+
+    def bytes_to_data(bytes_read, number_of_values):
+        # Unpack 6 uint8_t values
+        u = struct.unpack(f'{number_of_values*2}B', bytes_read)
+        output = []
+        for i in range(0, number_of_values):
+            val = (u[i*2 + 1] << 8) | u[i*2]
+            # Interpret as signed int16
+            val = struct.unpack('<h', struct.pack('<H', val))[0]
+            output.append(val)
+        return output
+
+    with open(file_path, 'rb') as bin_file:
+        first_header = bin_file.read(4)
+        # HAL_GetTick() is a uint32_t copied with memcpy — assume little-endian
+        start_time = struct.unpack('<I', first_header)[0]
+        print(f"start_time_ms = {start_time}")
+        while True:
+            header = bin_file.read(9)
+            if len(header) < 9:
+                break
+            index = header[0]
+            timestamp = struct.unpack('<I', header[1:5])[0]
+            data_size = struct.unpack('<I', header[5:9])[0]
+            print(f"Index: {index}, Timestamp: {timestamp}, Data size: {data_size}")
+            if index == 1:
+                start_time = sensor_data['adxl']['timestamps'][-1] if sensor_data['adxl']['timestamps'] else start_time
+                sensor_data['adxl']['timestamps'].append(timestamp)
+                sampling_rate = (data_size / 6) / ((timestamp - start_time) / 1000)
+                sensor_data['adxl']['sampling_rates'].append(sampling_rate)
+                for _ in range(data_size//6):
+                    bytes_read = bin_file.read(6)
+                    if len(bytes_read) < 6:
+                        break
+                    data = bytes_to_data(bytes_read, 3)
+                    sensor_data['adxl']['x'].append(data[0] / 2048.0)
+                    sensor_data['adxl']['y'].append(data[1] / 2048.0)
+                    sensor_data['adxl']['z'].append(data[2] / 2048.0)
+            elif index == 2:
+                start_time = sensor_data['bno']['timestamps'][-1] if sensor_data['bno']['timestamps'] else start_time
+                sensor_data['bno']['timestamps'].append(timestamp)
+                sampling_rate = (data_size / sensor_data['bno']['single_size']) / ((timestamp - start_time) / 1000)
+                sensor_data['bno']['sampling_rates'].append(sampling_rate)
+                for _ in range(data_size//sensor_data['bno']['single_size']):
+                    bytes_read = bin_file.read(6)
+                    if len(bytes_read) < 6:
+                        break
+                    data = bytes_to_data(bytes_read, 3)
+                    sensor_data['bno']['acc_x'].append(data[0]/100.0)
+                    sensor_data['bno']['acc_y'].append(data[1]/100.0)
+                    sensor_data['bno']['acc_z'].append(data[2]/100.0)
+                    bytes_read = bin_file.read(6)
+                    if len(bytes_read) < 6:
+                        break
+                    data = bytes_to_data(bytes_read, 3)
+                    sensor_data['bno']['gyr_x'].append(data[0]/16.0)
+                    sensor_data['bno']['gyr_y'].append(data[1]/16.0)
+                    sensor_data['bno']['gyr_z'].append(data[2]/16.0)
+                    bytes_read = bin_file.read(6)
+                    if len(bytes_read) < 6:
+                        break
+                    data = bytes_to_data(bytes_read, 3)
+                    sensor_data['bno']['mag_x'].append(data[0]/16.0)
+                    sensor_data['bno']['mag_y'].append(data[1]/16.0)
+                    sensor_data['bno']['mag_z'].append(data[2]/16.0)
+                    bytes_read = bin_file.read(6)
+                    if len(bytes_read) < 6:
+                        break
+                    data = bytes_to_data(bytes_read, 3)
+                    sensor_data['bno']['eul_heading'].append(data[0]/16.0)
+                    sensor_data['bno']['eul_roll'].append(data[1]/16.0)
+                    sensor_data['bno']['eul_pitch'].append(data[2]/16.0)
+                    bytes_read = bin_file.read(8)
+                    if len(bytes_read) < 8:
+                        break
+                    data = bytes_to_data(bytes_read, 4)
+                    sensor_data['bno']['quat_w'].append(data[0]/16384.0)
+                    sensor_data['bno']['quat_x'].append(data[1]/16384.0)
+                    sensor_data['bno']['quat_y'].append(data[2]/16384.0)
+                    sensor_data['bno']['quat_z'].append(data[3]/16384.0)
+                    bytes_read = bin_file.read(6)
+                    if len(bytes_read) < 6:
+                        break
+                    data = bytes_to_data(bytes_read, 3)
+                    sensor_data['bno']['lia_x'].append(data[0]/100.0)
+                    sensor_data['bno']['lia_y'].append(data[1]/100.0)
+                    sensor_data['bno']['lia_z'].append(data[2]/100.0)
+                    bytes_read = bin_file.read(6)
+                    if len(bytes_read) < 6:
+                        break
+                    data = bytes_to_data(bytes_read, 3)
+                    sensor_data['bno']['grv_x'].append(data[0]/100.0)
+                    sensor_data['bno']['grv_y'].append(data[1]/100.0)
+                    sensor_data['bno']['grv_z'].append(data[2]/100.0)
+                    bytes_read = bin_file.read(1)
+                    if len(bytes_read) < 1:
+                        break
+                    u = struct.unpack('1B', bytes_read)
+                    sensor_data['bno']['temp'].append(u[0])
+            elif index == 3:
+                start_time = sensor_data['adc0']['timestamps'][-1] if sensor_data['adc0']['timestamps'] else start_time
+                sensor_data['adc0']['timestamps'].append(timestamp)
+                sampling_rate = (data_size) / ((timestamp - start_time) / 1000)
+                sensor_data['adc0']['sampling_rates'].append(sampling_rate)
+                for _ in range(data_size):
+                    bytes_read = bin_file.read(1)
+                    u = struct.unpack('1B', bytes_read)
+                    i = struct.unpack('<h', struct.pack('<H', u[0]))[0]
+                    sensor_data['adc0']['values'].append(i / 255.0 * 1.8)
+
+        # Calculate average sampling rates
+        if sensor_data['adxl']['sampling_rates']:
+            sensor_data['adxl']['avg_sampling_rate'] = sum(sensor_data['adxl']['sampling_rates']) / len(sensor_data['adxl']['sampling_rates'])
+            print(f"ADXL Average Sampling Rate: {sensor_data['adxl']['avg_sampling_rate']} Hz")
+
+        if sensor_data['bno']['sampling_rates']:
+            sensor_data['bno']['avg_sampling_rate'] = sum(sensor_data['bno']['sampling_rates']) / len(sensor_data['bno']['sampling_rates'])
+            print(f"BNO Average Sampling Rate: {sensor_data['bno']['avg_sampling_rate']} Hz")
+
+        if sensor_data['adc0']['sampling_rates']:
+            sensor_data['adc0']['avg_sampling_rate'] = sum(sensor_data['adc0']['sampling_rates']) / len(sensor_data['adc0']['sampling_rates'])
+            print(f"ADC0 Average Sampling Rate: {sensor_data['adc0']['avg_sampling_rate']} Hz")
+
+        return sensor_data
 
 class FileReceiver():
     def __init__(self):
@@ -154,11 +333,9 @@ class MainWindow(QtWidgets.QMainWindow):
         left_col = QtWidgets.QVBoxLayout()
         main_layout.addLayout(left_col, 0)
 
-        # Center: graph placeholder
-        self.graph_placeholder = QtWidgets.QFrame()
-        self.graph_placeholder.setFrameShape(QtWidgets.QFrame.Box)
-        self.graph_placeholder.setStyleSheet("background: #f7f7f7;")
-        main_layout.addWidget(self.graph_placeholder, 2)
+        # Center: graph
+        self.graph_layout = QtWidgets.QVBoxLayout()
+        main_layout.addLayout(self.graph_layout, 2)
 
         # Right: console
         right_col = QtWidgets.QVBoxLayout()
@@ -238,6 +415,44 @@ class MainWindow(QtWidgets.QMainWindow):
         left_col.addWidget(grp_scpi)
 
         # ------------------
+        # Graph group
+        # ------------------
+        self.selected_graph_file = None
+        grp_graph = QtWidgets.QGroupBox("Graph")
+        graph_layout = QtWidgets.QVBoxLayout(grp_graph)
+
+        graph_controls = QtWidgets.QHBoxLayout()
+        self.btn_select_graph_file = QtWidgets.QPushButton("Select File")
+        self.btn_process_file = QtWidgets.QPushButton("Process File")
+        self.data_selector = QtWidgets.QComboBox()
+        self.btn_plot_graph = QtWidgets.QPushButton("Plot Graph")
+        self.graph_file_label = QtWidgets.QLabel("No file selected")
+        self.graph_file_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+
+        graph_controls.addWidget(self.btn_select_graph_file)
+        graph_controls.addWidget(self.btn_process_file)
+        graph_controls.addWidget(self.data_selector)
+        graph_controls.addWidget(self.btn_plot_graph)
+        graph_controls.addWidget(self.graph_file_label, 1)
+        graph_layout.addLayout(graph_controls)
+
+        self.graph_area = QtWidgets.QFrame()
+        self.graph_area.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        self.graph_area.setFrameShadow(QtWidgets.QFrame.Sunken)
+        self.graph_area.setMinimumHeight(350)
+        self.graph_area.setStyleSheet("background-color: #111111;")
+        graph_layout.addWidget(self.graph_area, 1)
+
+        graph_area_layout = QtWidgets.QVBoxLayout(self.graph_area)
+        graph_area_layout.setContentsMargins(0, 0, 0, 0)
+        self.figure = Figure(figsize=(5, 4), dpi=100)
+        self.canvas = FigureCanvas(self.figure)
+        graph_area_layout.addWidget(self.canvas)
+        self.ax = self.figure.add_subplot(111)
+
+        self.graph_layout.addWidget(grp_graph, 1)
+
+        # ------------------
         # Console group
         # ------------------
         self.last_line = ""
@@ -290,6 +505,10 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_clear_console.clicked.connect(self.on_clear_console)
         self.spin_max_lines.valueChanged.connect(self.on_max_lines_changed)
         btn_send.clicked.connect(self.on_send_scpi)
+
+        self.btn_select_graph_file.clicked.connect(self.on_select_graph_file)
+        self.btn_process_file.clicked.connect(self.on_process_file)
+        self.btn_plot_graph.clicked.connect(self.on_plot_graph)
 
         btn_on.clicked.connect(lambda: self.input_scpi.setText("POW:ON"))
         btn_off.clicked.connect(lambda: self.input_scpi.setText("POW:OFF"))
@@ -468,6 +687,105 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         
         asyncio.create_task(self.ble_workers[self.device_selector.currentIndex()].send_command(txt))
+
+    def on_select_graph_file(self):
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Select data file",
+            str(Path(__file__).resolve().parent),
+            "Data files (*.bin);;All files (*.*)"
+        )
+        if file_path:
+            self.selected_graph_file = file_path
+            self.graph_file_label.setText(Path(file_path).name)
+            self.set_status(f"Selected file: {Path(file_path).name}")
+
+    def on_process_file(self):
+        if not self.selected_graph_file:
+            QtWidgets.QMessageBox.information(self, "Process", "Select a file first.")
+            return
+        self.set_status(f"Processing: {Path(self.selected_graph_file).name}")
+
+        self.processed_data = process_data_file(self.selected_graph_file)
+
+        if self.processed_data:
+            self.data_selector.clear()
+            if self.processed_data['adxl']['timestamps']:
+                self.data_selector.addItem("ADXL", "adxl")
+            if self.processed_data['bno']['timestamps']:
+                self.data_selector.addItem("BNO", "bno")
+            if self.processed_data['adc0']['timestamps']:
+                self.data_selector.addItem("ADC0", "adc0")
+
+        self.set_status(f"Processing complete: {Path(self.selected_graph_file).name}")
+
+    def on_plot_graph(self):
+        if not self.selected_graph_file:
+            QtWidgets.QMessageBox.information(self, "Plot", "Select a file first.")
+            return
+        if not hasattr(self, "processed_data") or not self.processed_data:
+            QtWidgets.QMessageBox.information(self, "Plot", "Process the file first.")
+            return
+
+        data_key = self.data_selector.currentData()
+        if not data_key:
+            QtWidgets.QMessageBox.information(self, "Plot", "Select a data stream to plot.")
+            return
+
+        self.set_status(f"Plotting: {Path(self.selected_graph_file).name}")
+
+        self.ax.clear()
+
+        if data_key == "adxl":
+            t = np.linspace(0, len(self.processed_data["adxl"]["x"])-1, len(self.processed_data["adxl"]["x"])) / self.processed_data["adxl"]["avg_sampling_rate"]
+            x = np.array(self.processed_data["adxl"]["x"])
+            y = np.array(self.processed_data["adxl"]["y"])
+            z = np.array(self.processed_data["adxl"]["z"])
+            self.ax.plot(t, x, label="X")
+            self.ax.plot(t, y, label="Y")
+            self.ax.plot(t, z, label="Z")
+            self.ax.set_title("ADXL Acceleration")
+            self.ax.set_xlabel("Time [s]")
+            self.ax.set_ylabel("Acceleration [g]")
+            self.ax.legend(loc="best")
+
+        elif data_key == "bno":
+            t = np.linspace(0, len(self.processed_data["bno"]["eul_heading"])-1, len(self.processed_data["bno"]["eul_heading"])) / self.processed_data["bno"]["avg_sampling_rate"]
+            ax = np.array(self.processed_data["bno"]["eul_heading"], dtype=float)
+            ay = np.array(self.processed_data["bno"]["eul_pitch"], dtype=float)
+            az = np.array(self.processed_data["bno"]["eul_roll"], dtype=float)
+
+            def _unwrap_deg(vals):
+                unwrapped = np.rad2deg(np.unwrap(np.deg2rad(vals), discont=np.deg2rad(180.0)))
+                offset = np.round(unwrapped[0] / 360.0) * 360.0
+                return unwrapped - offset
+
+            ax = _unwrap_deg(ax)
+            ay = _unwrap_deg(ay)
+            az = _unwrap_deg(az)
+            self.ax.plot(t, ax, label="Euler Heading")
+            self.ax.plot(t, ay, label="Euler Pitch")
+            self.ax.plot(t, az, label="Euler Roll")
+            self.ax.set_title("BNO Orientation")
+            self.ax.set_xlabel("Time [s]")
+            self.ax.set_ylabel("Orientation [°]")
+            self.ax.legend(loc="best")
+
+        elif data_key == "adc0":
+            t = np.linspace(0, len(self.processed_data["adc0"]["values"])-1, len(self.processed_data["adc0"]["values"])) / self.processed_data["adc0"]["avg_sampling_rate"]
+            v = np.array(self.processed_data["adc0"]["values"])
+            self.ax.plot(t, v, label="ADC0")
+            self.ax.set_ylim(0, 2)
+            self.ax.set_title("ADC0")
+            self.ax.set_xlabel("Time [s]")
+            self.ax.set_ylabel("Value [V]")
+            self.ax.legend(loc="best")
+
+        self.ax.grid(True, alpha=0.3)
+        self.figure.tight_layout()
+        self.canvas.draw_idle()
+
+        
 
 
 def main():
