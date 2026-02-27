@@ -493,7 +493,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.packet_bytes = bytearray()
 
         self.rx_watchdog = QtCore.QTimer()
-        self.rx_watchdog.setInterval(200)
+        self.rx_watchdog.setInterval(3000)  # 3 seconds - give more time for packets to arrive
         self.rx_watchdog.timeout.connect(self.on_rx_timeout)
 
         self.console_deque = deque(maxlen=self.spin_max_lines.value())
@@ -546,7 +546,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_console_widget()
 
     def _append_console(self, text: str):
-        if not self.file_receiver.receiving:
+        # Allow file transfer control messages and sensor logs through even during receive
+        if not self.file_receiver.receiving or "FIL:ACK" in text or "FIL:NACK" in text or "[Sensor" in text:
             self.console_deque.append(text)
             self._refresh_console_widget()
 
@@ -563,18 +564,29 @@ class MainWindow(QtWidgets.QMainWindow):
 
                 if (self.packet_bytes_num == FILE_PACKET_SIZE) or (self.file_receiver.rx_bytes + self.packet_bytes_num >= self.file_receiver.file_size):
                     # send ACK back
+                    self.rx_watchdog.stop()  # Stop watchdog while sending ACK
+                    self.console_deque.append(f"[FILE RX] Block complete ({self.packet_bytes_num} bytes), sending ACK\n")
                     asyncio.create_task(self.ble_workers[sensor_id-1].send_command("FIL:ACK"))
 
                     self.file_receiver.handle_data(self.packet_bytes)
                     self.packet_bytes_num = 0
                     self.packet_bytes = bytearray()
+                    
+                    # Restart watchdog for next block
+                    self.rx_watchdog.start()
 
                 elif self.packet_bytes_num > FILE_PACKET_SIZE:
                     self.console_deque.append(f"Error: received more than {FILE_PACKET_SIZE} bytes without ACK\n")
+                    self.rx_watchdog.stop()
 
-                self.rx_watchdog.start()
+                else:
+                    # Keep accumulating data, restart watchdog
+                    self.rx_watchdog.start()
+                
+                self._refresh_console_widget()
 
                 if not self.file_receiver.receiving:
+                    self.rx_watchdog.stop()
                     self.console_deque.append("File receive complete\n")
                     self._refresh_console_widget()
             except Exception as e:
@@ -610,7 +622,17 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.file_receiver.receiving:
             self.packet_bytes_num = 0
             self.packet_bytes = bytearray()
-            asyncio.create_task(self.ble_workers[self.device_selector.currentIndex()].send_command("FIL:NACK"))
+            
+            # Try to send NACK if still connected
+            selected_idx = self.device_selector.currentData()
+            if selected_idx is not None:
+                worker = self.ble_workers[selected_idx - 1]
+                if worker.client and worker.client.is_connected:
+                    loop = asyncio.get_event_loop()
+                    loop.create_task(worker.send_command("FIL:NACK"))
+                else:
+                    self.console_deque.append("File receive timeout - device disconnected, cannot send NACK\n")
+            
             self.console_deque.append("File receive timeout\n")
             self._refresh_console_widget()
 
@@ -686,7 +708,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not txt or not self.connected_workers:
             return
         
-        asyncio.create_task(self.ble_workers[self.device_selector.currentIndex()].send_command(txt))
+        asyncio.create_task(self.ble_workers[self.device_selector.currentData() - 1].send_command(txt))
 
     def on_select_graph_file(self):
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
