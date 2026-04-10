@@ -24,7 +24,7 @@ UART_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 UART_RX_CHAR_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 UART_TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
-SENSOR_ADDR = ["E7:31:E9:B5:72:2A", "C6:E6:A3:FC:45:F5"]
+SENSOR_ADDR = ["C6:E6:A3:FC:45:F5", "EB:F8:1D:58:73:87"]
 
 def process_data_file(file_path):
     sensor_data = {
