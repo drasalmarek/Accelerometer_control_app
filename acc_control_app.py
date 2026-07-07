@@ -15,6 +15,8 @@ import struct
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+import csv
+
 FILE_PACKET_SIZE = 1024
 
 # ---------------------------
@@ -26,6 +28,17 @@ UART_TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
 SENSOR_ADDR = ["C6:E6:A3:FC:45:F5", "EB:F8:1D:58:73:87"]
 
+
+def get_app_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def get_measured_data_dir() -> Path:
+    data_root = get_app_base_dir()
+    return data_root / "measured_data"
+
 def process_data_file(file_path):
     sensor_data = {
         'adxl' : {
@@ -34,6 +47,8 @@ def process_data_file(file_path):
             'z' : [],
             'timestamps' : [],
             'sampling_rates' : [],
+            'data_sizes' : [],
+            'time_axis' : np.array([]),
             'avg_sampling_rate' : 0
         },
 
@@ -61,17 +76,22 @@ def process_data_file(file_path):
             'grv_y' : [],
             'grv_z' : [],
             'temp' : [],
-            'single_size' : (6*3 + 6 + 8 + 6 + 6 + 1),
+            'single_size' : (6*3 + 6 + 8 + 6 + 6 + 1), # 45
 
             'timestamps' : [],
+            'data_sizes' : [],
             'sampling_rates' : [],
+            'time_axis' : np.array([]),
             'avg_sampling_rate' : 0
         },
 
         'adc0' : {
-            'values' : [],
+            'values_ch1' : [],
+            'values_ch2' : [],
             'timestamps' : [],
+            'data_sizes' : [],
             'sampling_rates' : [],
+            'time_axis' : np.array([]),
             'avg_sampling_rate' : 0
         }
     }
@@ -90,8 +110,8 @@ def process_data_file(file_path):
     with open(file_path, 'rb') as bin_file:
         first_header = bin_file.read(4)
         # HAL_GetTick() is a uint32_t copied with memcpy — assume little-endian
-        start_time = struct.unpack('<I', first_header)[0]
-        print(f"start_time_ms = {start_time}")
+        global_start_time = struct.unpack('<I', first_header)[0]
+        print(f"global_start_time_ms = {global_start_time}")
         while True:
             header = bin_file.read(9)
             if len(header) < 9:
@@ -101,8 +121,9 @@ def process_data_file(file_path):
             data_size = struct.unpack('<I', header[5:9])[0]
             print(f"Index: {index}, Timestamp: {timestamp}, Data size: {data_size}")
             if index == 1:
-                start_time = sensor_data['adxl']['timestamps'][-1] if sensor_data['adxl']['timestamps'] else start_time
+                start_time = sensor_data['adxl']['timestamps'][-1] if sensor_data['adxl']['timestamps'] else global_start_time
                 sensor_data['adxl']['timestamps'].append(timestamp)
+                sensor_data['adxl']['data_sizes'].append(int(data_size / 6))
                 sampling_rate = (data_size / 6) / ((timestamp - start_time) / 1000)
                 sensor_data['adxl']['sampling_rates'].append(sampling_rate)
                 for _ in range(data_size//6):
@@ -114,8 +135,9 @@ def process_data_file(file_path):
                     sensor_data['adxl']['y'].append(data[1] / 2048.0)
                     sensor_data['adxl']['z'].append(data[2] / 2048.0)
             elif index == 2:
-                start_time = sensor_data['bno']['timestamps'][-1] if sensor_data['bno']['timestamps'] else start_time
+                start_time = sensor_data['bno']['timestamps'][-1] if sensor_data['bno']['timestamps'] else global_start_time
                 sensor_data['bno']['timestamps'].append(timestamp)
+                sensor_data['bno']['data_sizes'].append(int(data_size / sensor_data['bno']['single_size']))
                 sampling_rate = (data_size / sensor_data['bno']['single_size']) / ((timestamp - start_time) / 1000)
                 sensor_data['bno']['sampling_rates'].append(sampling_rate)
                 for _ in range(data_size//sensor_data['bno']['single_size']):
@@ -175,43 +197,69 @@ def process_data_file(file_path):
                     u = struct.unpack('1B', bytes_read)
                     sensor_data['bno']['temp'].append(u[0])
             elif index == 3:
-                start_time = sensor_data['adc0']['timestamps'][-1] if sensor_data['adc0']['timestamps'] else start_time
+                start_time = sensor_data['adc0']['timestamps'][-1] if sensor_data['adc0']['timestamps'] else global_start_time
                 sensor_data['adc0']['timestamps'].append(timestamp)
-                sampling_rate = (data_size) / ((timestamp - start_time) / 1000)
+                sampling_rate = (data_size / 4) / ((timestamp - start_time) / 1000)
                 sensor_data['adc0']['sampling_rates'].append(sampling_rate)
-                for _ in range(data_size):
-                    bytes_read = bin_file.read(1)
-                    u = struct.unpack('1B', bytes_read)
-                    i = struct.unpack('<h', struct.pack('<H', u[0]))[0]
-                    sensor_data['adc0']['values'].append(i / 255.0 * 1.8)
+                sensor_data['adc0']['data_sizes'].append(int(data_size / 4))
+                for _ in range(data_size // 4):
+                    bytes_read = bin_file.read(4)  # 2 bytes for CH1 + 2 bytes for CH2
+                    if len(bytes_read) < 4:
+                        break
 
-        # Calculate average sampling rates
-        if sensor_data['adxl']['sampling_rates']:
-            sensor_data['adxl']['avg_sampling_rate'] = sum(sensor_data['adxl']['sampling_rates']) / len(sensor_data['adxl']['sampling_rates'])
+                    ch1, ch2 = struct.unpack('<HH', bytes_read)  # little-endian uint16, uint16
+                    sensor_data['adc0']['values_ch1'].append(ch1)
+                    sensor_data['adc0']['values_ch2'].append(ch2)
+
+
+        # Calculate average sampling rates excluding the last element
+        if len(sensor_data['adxl']['sampling_rates']) > 1:
+            rates = sensor_data['adxl']['sampling_rates'][:-1]
+            sensor_data['adxl']['avg_sampling_rate'] = sum(rates) / len(rates)
             print(f"ADXL Average Sampling Rate: {sensor_data['adxl']['avg_sampling_rate']} Hz")
 
-        if sensor_data['bno']['sampling_rates']:
-            sensor_data['bno']['avg_sampling_rate'] = sum(sensor_data['bno']['sampling_rates']) / len(sensor_data['bno']['sampling_rates'])
+        if len(sensor_data['bno']['sampling_rates']) > 1:
+            rates = sensor_data['bno']['sampling_rates'][:-1]
+            sensor_data['bno']['avg_sampling_rate'] = sum(rates) / len(rates)
             print(f"BNO Average Sampling Rate: {sensor_data['bno']['avg_sampling_rate']} Hz")
 
-        if sensor_data['adc0']['sampling_rates']:
-            sensor_data['adc0']['avg_sampling_rate'] = sum(sensor_data['adc0']['sampling_rates']) / len(sensor_data['adc0']['sampling_rates'])
+        if len(sensor_data['adc0']['sampling_rates']) > 1:
+            rates = sensor_data['adc0']['sampling_rates'][:-1]
+            sensor_data['adc0']['avg_sampling_rate'] = sum(rates) / len(rates)
             print(f"ADC0 Average Sampling Rate: {sensor_data['adc0']['avg_sampling_rate']} Hz")
+
+        # Generate time axis for each sensor based on timestamps
+        for i in range(0, len(sensor_data['adxl']['sampling_rates'])):
+            partial_time = np.linspace((sensor_data['adxl']['time_axis'][-1] if sensor_data['adxl']['time_axis'].size > 0 else 0), (sensor_data['adxl']['time_axis'][-1] if sensor_data['adxl']['time_axis'].size > 0 else 0) + sensor_data['adxl']['data_sizes'][i] / sensor_data['adxl']['sampling_rates'][i], num=sensor_data['adxl']['data_sizes'][i])
+
+            sensor_data['adxl']['time_axis'] = np.concatenate((sensor_data['adxl']['time_axis'], partial_time))
+
+        for i in range(0, len(sensor_data['bno']['sampling_rates'])):
+            partial_time = np.linspace((sensor_data['bno']['time_axis'][-1] if sensor_data['bno']['time_axis'].size > 0 else 0), (sensor_data['bno']['time_axis'][-1] if sensor_data['bno']['time_axis'].size > 0 else 0) + sensor_data['bno']['data_sizes'][i] / sensor_data['bno']['sampling_rates'][i], num=sensor_data['bno']['data_sizes'][i])
+
+            sensor_data['bno']['time_axis'] = np.concatenate((sensor_data['bno']['time_axis'], partial_time))
+
+        for i in range(0, len(sensor_data['adc0']['sampling_rates'])):
+            partial_time = np.linspace((sensor_data['adc0']['time_axis'][-1] if sensor_data['adc0']['time_axis'].size > 0 else 0), (sensor_data['adc0']['time_axis'][-1] if sensor_data['adc0']['time_axis'].size > 0 else 0) + sensor_data['adc0']['data_sizes'][i] / sensor_data['adc0']['sampling_rates'][i], num=sensor_data['adc0']['data_sizes'][i])
+
+            sensor_data['adc0']['time_axis'] = np.concatenate((sensor_data['adc0']['time_axis'], partial_time))
 
         return sensor_data
 
 class FileReceiver():
-    def __init__(self):
+    def __init__(self, log_callback=None):
         self.receiving = False
         self.file = None
         self.rx_bytes = 0
         self.header = []
         self.file_size = 0
+        self.log_callback = log_callback
 
     def start_receiving(self, filename, file_size=0):
         safe_name = Path(filename).name
-        script_dir = Path(__file__).resolve().parent
-        full_path = script_dir / safe_name
+        measured_data_dir = get_measured_data_dir()
+        measured_data_dir.mkdir(parents=True, exist_ok=True)
+        full_path = measured_data_dir / safe_name
         self.file = open(full_path, "wb")
         self.rx_bytes = 0
         self.header = []
@@ -229,6 +277,8 @@ class FileReceiver():
             self.file.write(data)
             self.rx_bytes += len(data)
             print(f"Received {self.rx_bytes}/{self.file_size} bytes")
+            if self.log_callback:
+                self.log_callback(f"Received {self.rx_bytes}/{self.file_size} bytes\n")
             if self.rx_bytes >= self.file_size:
                 print("File receive complete")
                 self.stop_receiving()
@@ -388,21 +438,23 @@ class MainWindow(QtWidgets.QMainWindow):
         scpi_layout = QtWidgets.QVBoxLayout(grp_scpi)
 
         presets_layout = QtWidgets.QGridLayout()
-        btn_on = QtWidgets.QPushButton("POW ON")
-        btn_off = QtWidgets.QPushButton("POW OFF")
+        btn_on = QtWidgets.QPushButton("POW:ON")
+        btn_off = QtWidgets.QPushButton("POW:OFF")
         btn_idn = QtWidgets.QPushButton("*IDN?")
-        btn_measure_start = QtWidgets.QPushButton("MEAS START")
-        btn_measure_stop = QtWidgets.QPushButton("MEAS STOP")
-        btn_err_count = QtWidgets.QPushButton("ERR COUNT?")
-        btn_err_next = QtWidgets.QPushButton("ERR NEXT?")
+        btn_measure_start = QtWidgets.QPushButton("MEAS:START")
+        btn_measure_stop = QtWidgets.QPushButton("MEAS:STOP")
+        btn_battery = QtWidgets.QPushButton("MEAS:BAT")
+        btn_ls = QtWidgets.QPushButton("FIL:LS?")
+        btn_read = QtWidgets.QPushButton("FIL:READ?")
 
         presets_layout.addWidget(btn_on, 0, 0)
         presets_layout.addWidget(btn_off, 0, 1)
         presets_layout.addWidget(btn_idn, 0, 2)
         presets_layout.addWidget(btn_measure_start, 1, 0)
         presets_layout.addWidget(btn_measure_stop, 1, 1)
-        presets_layout.addWidget(btn_err_count, 2, 0)
-        presets_layout.addWidget(btn_err_next, 2, 1)
+        presets_layout.addWidget(btn_battery, 1, 2)
+        presets_layout.addWidget(btn_ls, 2, 0)
+        presets_layout.addWidget(btn_read, 2, 1)
         scpi_layout.addLayout(presets_layout)
 
         input_layout = QtWidgets.QHBoxLayout()
@@ -426,6 +478,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_process_file = QtWidgets.QPushButton("Process File")
         self.data_selector = QtWidgets.QComboBox()
         self.btn_plot_graph = QtWidgets.QPushButton("Plot Graph")
+        self.btn_export_csv = QtWidgets.QPushButton("Export CSV")
         self.graph_file_label = QtWidgets.QLabel("No file selected")
         self.graph_file_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
 
@@ -433,6 +486,7 @@ class MainWindow(QtWidgets.QMainWindow):
         graph_controls.addWidget(self.btn_process_file)
         graph_controls.addWidget(self.data_selector)
         graph_controls.addWidget(self.btn_plot_graph)
+        graph_controls.addWidget(self.btn_export_csv)
         graph_controls.addWidget(self.graph_file_label, 1)
         graph_layout.addLayout(graph_controls)
 
@@ -460,6 +514,7 @@ class MainWindow(QtWidgets.QMainWindow):
         console_layout = QtWidgets.QVBoxLayout(grp_console)
         self.console_view = QtWidgets.QTextEdit()
         self.console_view.setReadOnly(True)
+        self.console_view.setLineWrapMode(QtWidgets.QTextEdit.NoWrap)
         self.console_view.textChanged.connect(lambda: self.console_view.moveCursor(QtGui.QTextCursor.End))
         self.console_view.setFixedWidth(400)
         console_layout.addWidget(self.console_view)
@@ -486,14 +541,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ble_workers = [BLEWorker(sensor_id=i) for i in range(len(SENSOR_ADDR))]
         self.connected_workers = set()
         self.scanning = False
+        self._shutdown_in_progress = False
+        self._allow_close_after_shutdown = False
 
         # File receiver
-        self.file_receiver = FileReceiver()
+        self.file_receiver = FileReceiver(log_callback=self._append_console)
         self.packet_bytes_num = 0
         self.packet_bytes = bytearray()
 
         self.rx_watchdog = QtCore.QTimer()
-        self.rx_watchdog.setInterval(3000)  # 3 seconds - give more time for packets to arrive
+        self.rx_watchdog.setInterval(3000)  # 3 seconds - give more time for packets to arrive     
         self.rx_watchdog.timeout.connect(self.on_rx_timeout)
 
         self.console_deque = deque(maxlen=self.spin_max_lines.value())
@@ -509,14 +566,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_select_graph_file.clicked.connect(self.on_select_graph_file)
         self.btn_process_file.clicked.connect(self.on_process_file)
         self.btn_plot_graph.clicked.connect(self.on_plot_graph)
-
+        self.btn_export_csv.clicked.connect(self.on_export_csv)
         btn_on.clicked.connect(lambda: self.input_scpi.setText("POW:ON"))
         btn_off.clicked.connect(lambda: self.input_scpi.setText("POW:OFF"))
         btn_idn.clicked.connect(lambda: self.input_scpi.setText("*IDN?"))
-        btn_measure_start.clicked.connect(lambda: self.input_scpi.setText("MEAS:START"))
+        btn_measure_start.clicked.connect(lambda: self.input_scpi.setText("MEAS:START filename"))
         btn_measure_stop.clicked.connect(lambda: self.input_scpi.setText("MEAS:STOP"))
-        btn_err_count.clicked.connect(lambda: self.input_scpi.setText("SYST:ERR:COUNT?"))
-        btn_err_next.clicked.connect(lambda: self.input_scpi.setText("SYST:ERR:NEXT?"))
+        btn_battery.clicked.connect(lambda: self.input_scpi.setText("MEAS:BAT v_bat"))
+        btn_ls.clicked.connect(lambda: self.input_scpi.setText("FIL:LS?"))
+        btn_read.clicked.connect(lambda: self.input_scpi.setText("FIL:READ? filename,postfix"))
 
         # Connect functions to all BLE workers
         for i, worker in enumerate(self.ble_workers):
@@ -547,7 +605,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _append_console(self, text: str):
         # Allow file transfer control messages and sensor logs through even during receive
-        if not self.file_receiver.receiving or "FIL:ACK" in text or "FIL:NACK" in text or "[Sensor" in text:
+        if not self.file_receiver.receiving or "FIL:NACK" in text or "Received" in text or "File receive complete" in text or "File receive timeout" in text:
             self.console_deque.append(text)
             self._refresh_console_widget()
 
@@ -565,7 +623,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 if (self.packet_bytes_num == FILE_PACKET_SIZE) or (self.file_receiver.rx_bytes + self.packet_bytes_num >= self.file_receiver.file_size):
                     # send ACK back
                     self.rx_watchdog.stop()  # Stop watchdog while sending ACK
-                    self.console_deque.append(f"[FILE RX] Block complete ({self.packet_bytes_num} bytes), sending ACK\n")
                     asyncio.create_task(self.ble_workers[sensor_id-1].send_command("FIL:ACK"))
 
                     self.file_receiver.handle_data(self.packet_bytes)
@@ -688,7 +745,26 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_worker_connected(self, worker: BLEWorker, connected: bool):
         if connected:
             self.connected_workers.add(worker.sensor_id)
-            asyncio.create_task(worker.send_command("POW:ON"))
+
+            async def send_startup_commands():
+                await worker.send_command("POW:ON")
+                await asyncio.sleep(3)
+                await worker.send_command("CONF:ADXL ON,400")
+                await asyncio.sleep(0.2)
+                await worker.send_command("CONF:BNO OFF,100")
+                await asyncio.sleep(0.2)
+                await worker.send_command("CONF:ADC OFF,10000")
+                await asyncio.sleep(1)
+                await worker.send_command("CONF:ADXL?")
+                await asyncio.sleep(0.2)
+                await worker.send_command("CONF:BNO?")
+                await asyncio.sleep(0.2)
+                await worker.send_command("CONF:ADC?")
+                await asyncio.sleep(0.2)
+                await self._append_console(f"[Sensor {worker.sensor_id+1}] successfully initialized\n")
+
+            asyncio.create_task(send_startup_commands())
+
             self.device_selector.addItem(f"Sensor {worker.sensor_id+1}", worker.sensor_id+1)
             self.set_status(f"Connected: {len(self.connected_workers)} device(s)")
         else:
@@ -697,24 +773,70 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @qasync.asyncSlot()
     async def on_disconnect_all(self):
-        tasks = [worker.disconnect() for worker in self.ble_workers if worker.client]
-        if tasks:
-            await asyncio.gather(*tasks)
+        await self._disconnect_workers(send_power_off=True)
+
+    async def _disconnect_workers(self, send_power_off: bool = False):
+        connected_workers = [worker for worker in self.ble_workers if worker.client and worker.client.is_connected]
+
+        if send_power_off and connected_workers:
+            await asyncio.gather(
+                *(worker.send_command("POW:OFF") for worker in connected_workers),
+                return_exceptions=True,
+            )
+
+        if connected_workers:
+            await asyncio.gather(
+                *(worker.disconnect() for worker in connected_workers),
+                return_exceptions=True,
+            )
+
         self.connected_workers.clear()
+
+    async def _shutdown_and_close(self):
+        try:
+            await self._disconnect_workers(send_power_off=True)
+        finally:
+            self._allow_close_after_shutdown = True
+            app = QtWidgets.QApplication.instance()
+            if app is not None:
+                app.quit()
+
+    def closeEvent(self, event):
+        if self._allow_close_after_shutdown:
+            event.accept()
+            return
+
+        if self._shutdown_in_progress:
+            event.ignore()
+            return
+
+        self._shutdown_in_progress = True
+        event.ignore()
+        asyncio.create_task(self._shutdown_and_close())
 
     @qasync.asyncSlot()
     async def on_send_scpi(self):
         txt = self.input_scpi.text().strip()
         if not txt or not self.connected_workers:
             return
-        
-        asyncio.create_task(self.ble_workers[self.device_selector.currentData() - 1].send_command(txt))
+
+        selected_idx = self.device_selector.currentData()
+        if selected_idx is None:
+            return
+
+        worker = self.ble_workers[selected_idx - 1]
+        try:
+            await worker.send_command(txt)
+        finally:
+            normalized_txt = txt.replace(" ", "").lower()
+            if normalized_txt in {"pow:off", "power:off"}:
+                await worker.disconnect()
 
     def on_select_graph_file(self):
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             "Select data file",
-            str(Path(__file__).resolve().parent),
+            str(get_app_base_dir()),
             "Data files (*.bin);;All files (*.*)"
         )
         if file_path:
@@ -794,20 +916,63 @@ class MainWindow(QtWidgets.QMainWindow):
             self.ax.legend(loc="best")
 
         elif data_key == "adc0":
-            t = np.linspace(0, len(self.processed_data["adc0"]["values"])-1, len(self.processed_data["adc0"]["values"])) / self.processed_data["adc0"]["avg_sampling_rate"]
-            v = np.array(self.processed_data["adc0"]["values"])
-            self.ax.plot(t, v, label="ADC0")
-            self.ax.set_ylim(0, 2)
+            t = np.linspace(0, len(self.processed_data["adc0"]["values_ch1"])-1, len(self.processed_data["adc0"]["values_ch1"])) / self.processed_data["adc0"]["avg_sampling_rate"]
+            data_ch1 = np.array(self.processed_data["adc0"]["values_ch1"])
+            data_ch2 = np.array(self.processed_data["adc0"]["values_ch2"])
+            self.ax.plot(t, data_ch1, label="ADC_CH1")
+            self.ax.plot(t, data_ch2, label="ADC_CH2")
+            self.ax.set_ylim(0, 16384)
+            self.ax.set_yticks([0, 4096, 8192, 12288, 16384])
             self.ax.set_title("ADC0")
             self.ax.set_xlabel("Time [s]")
-            self.ax.set_ylabel("Value [V]")
+            self.ax.set_ylabel("ADC value [LSB]")
             self.ax.legend(loc="best")
 
         self.ax.grid(True, alpha=0.3)
         self.figure.tight_layout()
         self.canvas.draw_idle()
 
+    def on_export_csv(self):
+        if not self.selected_graph_file:
+            QtWidgets.QMessageBox.information(self, "Export CSV", "Select a file first.")
+            return
+        if not hasattr(self, "processed_data") or not self.processed_data:
+            QtWidgets.QMessageBox.information(self, "Export CSV", "Process the file first.")
+            return
+
+        data_key = self.data_selector.currentData()
+        if not data_key:
+            QtWidgets.QMessageBox.information(self, "Export CSV", "Select a data stream to export.")
+            return
+
+        default_name = f"{Path(self.selected_graph_file).stem}_{data_key}.csv"
+        csv_filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Export CSV",
+            str(Path(self.selected_graph_file).with_name(default_name)),
+            "CSV Files (*.csv);;All Files (*)",
+        )
+        if not csv_filename:
+            return
+        csv_filename = Path(csv_filename)
         
+        with open(csv_filename, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            if data_key == "adxl":
+                writer.writerow(["Time [s]", "X [g]", "Y [g]", "Z [g]"])
+                t = self.processed_data["adxl"]["time_axis"]
+                for i in range(len(t)):
+                    writer.writerow([t[i], self.processed_data["adxl"]["x"][i], self.processed_data["adxl"]["y"][i], self.processed_data["adxl"]["z"][i]])
+            elif data_key == "bno":
+                writer.writerow(["Time [s]", "Euler Heading [°]", "Euler Pitch [°]", "Euler Roll [°]"])
+                t = self.processed_data["bno"]["time_axis"]
+                for i in range(len(t)):
+                    writer.writerow([t[i], self.processed_data["bno"]["eul_heading"][i], self.processed_data["bno"]["eul_pitch"][i], self.processed_data["bno"]["eul_roll"][i]])
+            elif data_key == "adc0":
+                writer.writerow(["Time [s]", "ADC_CH1 [LSB]", "ADC_CH2 [LSB]"])
+                t = self.processed_data["adc0"]["time_axis"]
+                for i in range(len(t)):
+                    writer.writerow([t[i], self.processed_data["adc0"]["values_ch1"][i], self.processed_data["adc0"]["values_ch2"][i]])
 
 
 def main():
