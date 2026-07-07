@@ -250,6 +250,7 @@ class FileReceiver():
     def __init__(self, log_callback=None):
         self.receiving = False
         self.file = None
+        self.file_path = None
         self.rx_bytes = 0
         self.header = []
         self.file_size = 0
@@ -261,6 +262,7 @@ class FileReceiver():
         measured_data_dir.mkdir(parents=True, exist_ok=True)
         full_path = measured_data_dir / safe_name
         self.file = open(full_path, "wb")
+        self.file_path = full_path
         self.rx_bytes = 0
         self.header = []
         self.file_size = file_size
@@ -271,6 +273,17 @@ class FileReceiver():
             self.file.close()
             self.file = None
         self.receiving = False
+
+    def abort_receiving(self, delete_file=False):
+        file_path = self.file_path
+        self.stop_receiving()
+        self.file_path = None
+
+        if delete_file and file_path:
+            try:
+                file_path.unlink()
+            except FileNotFoundError:
+                pass
 
     def handle_data(self, data: bytearray):
         if self.receiving and self.file:
@@ -677,18 +690,29 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def on_rx_timeout(self):
         if self.file_receiver.receiving:
+            self.rx_watchdog.stop()
             self.packet_bytes_num = 0
             self.packet_bytes = bytearray()
             
             # Try to send NACK if still connected
             selected_idx = self.device_selector.currentData()
-            if selected_idx is not None:
-                worker = self.ble_workers[selected_idx - 1]
-                if worker.client and worker.client.is_connected:
-                    loop = asyncio.get_event_loop()
-                    loop.create_task(worker.send_command("FIL:NACK"))
-                else:
-                    self.console_deque.append("File receive timeout - device disconnected, cannot send NACK\n")
+            if selected_idx is None:
+                self.file_receiver.abort_receiving(delete_file=True)
+                self.console_deque.append("File receive timeout - no device selected, cannot send NACK\n")
+                self.set_status(f"Connected: {len(self.connected_workers)} device(s)")
+                self._refresh_console_widget()
+                return
+
+            worker = self.ble_workers[selected_idx - 1]
+            if worker.client and worker.client.is_connected:
+                loop = asyncio.get_event_loop()
+                loop.create_task(worker.send_command("FIL:NACK"))
+            else:
+                self.file_receiver.abort_receiving(delete_file=True)
+                self.console_deque.append("File receive timeout - device disconnected, cannot send NACK\n")
+                self.set_status(f"Connected: {len(self.connected_workers)} device(s)")
+                self._refresh_console_widget()
+                return
             
             self.console_deque.append("File receive timeout\n")
             self._refresh_console_widget()
