@@ -693,29 +693,22 @@ class MainWindow(QtWidgets.QMainWindow):
             self.rx_watchdog.stop()
             self.packet_bytes_num = 0
             self.packet_bytes = bytearray()
-            
-            # Try to send NACK if still connected
-            selected_idx = self.device_selector.currentData()
-            if selected_idx is None:
-                self.file_receiver.abort_receiving(delete_file=True)
-                self.console_deque.append("File receive timeout - no device selected, cannot send NACK\n")
-                self.set_status(f"Connected: {len(self.connected_workers)} device(s)")
-                self._refresh_console_widget()
-                return
 
-            worker = self.ble_workers[selected_idx - 1]
-            if worker.client and worker.client.is_connected:
-                loop = asyncio.get_event_loop()
-                loop.create_task(worker.send_command("FIL:NACK"))
-            else:
-                self.file_receiver.abort_receiving(delete_file=True)
-                self.console_deque.append("File receive timeout - device disconnected, cannot send NACK\n")
-                self.set_status(f"Connected: {len(self.connected_workers)} device(s)")
-                self._refresh_console_widget()
-                return
-            
-            self.console_deque.append("File receive timeout\n")
-            self._refresh_console_widget()
+            selected_idx = self.device_selector.currentData()
+            worker = self.ble_workers[selected_idx - 1] if selected_idx is not None else None
+
+            asyncio.create_task(self._handle_file_receive_timeout(worker))
+
+    async def _handle_file_receive_timeout(self, worker: Optional[BLEWorker]):
+        self.file_receiver.abort_receiving(delete_file=True)
+        self.console_deque.append("File receive timeout\n")
+        self._refresh_console_widget()
+
+        if worker and worker.client and worker.client.is_connected:
+            await worker.disconnect()
+
+        self.set_status(f"Connected: {len(self.connected_workers)} device(s)")
+        self._refresh_console_widget()
 
     def _refresh_console_widget(self):
         self.console_view.setPlainText("".join(self.console_deque))
